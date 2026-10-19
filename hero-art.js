@@ -12,6 +12,9 @@
     keeper:{src:'assets/heroes/moc.png',weapon:'moonWand',frame:{x:-52,y:-76,w:104,h:104},grip:{x:-19.5,y:-7.9,rx:3.1,ry:3.5}},
     soulcaller:{src:'assets/heroes/lam.png',weapon:'frostStaff',frame:{x:-52,y:-76,w:104,h:104},grip:{x:-24.7,y:-8.8,rx:3.1,ry:3.6}}
   };
+  assets.apprentice.rig={top:8,cut:13,legs:[{x:-25,w:25,pivot:-12},{x:0,w:24,pivot:10}]};
+  assets.keeper.rig={top:7,cut:12,legs:[{x:-17,w:18,pivot:-7},{x:1,w:20,pivot:11}]};
+  assets.soulcaller.rig={top:8,cut:14,legs:[{x:-24,w:24,pivot:-11},{x:0,w:23,pivot:9}]};
   function portrait(id='apprentice'){
     const asset=assets[id]||assets.apprentice,f=asset.frame,g=asset.grip,px=(g.x-f.x)/f.w*100,py=(g.y-f.y)/f.h*100;
     const img='<img src="'+asset.src+'" width="1254" height="1254" alt="" decoding="async"';

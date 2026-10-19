@@ -2,9 +2,10 @@
   'use strict';
   const D=root.NecroData,TAU=Math.PI*2,hash=(x,y,s=0)=>{const n=Math.sin(x*127.1+y*311.7+s*71.9)*43758.5453;return n-Math.floor(n);};
   class Renderer{
-    constructor(canvas){this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.camera={x:0,y:0};this.particles=[];this.rings=[];this.numbers=[];this.threads=[];this.shake=0;this.t=0;this.heroSprites=new Map();this.weaponSprites=new Map();this.lastHeroPosition=null;this.heroWalking=false;this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;this.prepareHeroArt();this.resize();}
+    constructor(canvas){this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.camera={x:0,y:0};this.particles=[];this.rings=[];this.numbers=[];this.threads=[];this.shake=0;this.t=0;this.heroSprites=new Map();this.weaponSprites=new Map();this.summonSprites=new Map();this.minionMotion=new WeakMap();this.heroMotion=null;this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;this.prepareHeroArt();this.resize();}
     prepareHeroArt(){
       for(const hero of D.heroes){const img=new Image();img.src=NecroHeroArt.assets[hero.id].src;this.heroSprites.set(hero.id,img);}
+      for(const [type,asset] of Object.entries(NecroCreatureArt.assets)){const img=new Image();img.src=asset.src;this.summonSprites.set(type,img);}
       for(const weapon of D.weapons){const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(NecroRelicArt.svg(weapon.id));this.weaponSprites.set(weapon.id,img);}
     }
     resize(){const r=this.canvas.parentElement.getBoundingClientRect();this.w=r.width;this.h=r.height;this.dpr=Math.min(devicePixelRatio||1,2);this.zoom=Math.min(1,Math.max(.68,this.w/750));this.canvas.width=Math.round(this.w*this.dpr);this.canvas.height=Math.round(this.h*this.dpr);}
@@ -94,18 +95,35 @@
     }
     wizard(p){
       const c=this.ctx,hero=D.heroes.find(h=>h.id===p.heroId)||D.heroes[0],weapon=D.weapons.find(w=>w.id===p.weaponId)||D.weapons[0],style=NecroHeroArt.styles[hero.id];
-      const moving=!p.presentation&&this.heroWalking&&!this.reduced,step=moving?Math.sin(this.t*13):0;
-      const img=this.heroSprites.get(hero.id),asset=NecroHeroArt.assets[hero.id],frame=asset.frame,grip=asset.grip,bob=this.reduced?0:moving?Math.abs(step)*1.3:Math.sin(this.t*3)*.7,side=p.look||1;
-      this.ellipse(0,22,22,6,'#0b081580');this.glow(0,-8,60,style.coat+'25');c.save();c.translate(0,bob);c.scale(side,1);if(moving)c.rotate(step*.018);
+      const motion=p.presentation?null:this.heroMotion,pose=NecroMotion.pose(motion);
+      const img=this.heroSprites.get(hero.id),asset=NecroHeroArt.assets[hero.id],frame=asset.frame,grip=asset.grip,bob=this.reduced?0:motion?.weight?pose.bob:Math.sin(this.t*2.5)*.35,side=p.presentation?(p.look||1):(motion?.facing||p.look||1);
+      this.ellipse(0,23,22,6,'#0b081580');this.glow(0,-8,60,style.coat+'25');c.save();c.translate(0,bob);c.scale(side,1);
       if(p.invuln>0&&Math.floor(this.t*16)%2===0)c.globalAlpha=.55;
-      const ready=img?.complete&&img.naturalWidth;if(ready)c.drawImage(img,frame.x,frame.y,frame.w,frame.h);
+      const ready=img?.complete&&img.naturalWidth;if(ready)NecroMotion.paint(c,img,frame,asset.rig,motion);
       const relic=this.weaponSprites.get(weapon.id),book=weapon.shape==='book',height=book?61:72,width=height*2/3,handleY=65;
       c.save();c.translate(grip.x,grip.y);c.rotate(-.2);if(relic?.complete&&relic.naturalWidth)c.drawImage(relic,-width/2,-height*handleY/120,width,height);c.restore();
       // Reuse the painted hand above the weapon instead of adding a flat replacement hand.
       if(ready){c.save();c.beginPath();c.ellipse(grip.x,grip.y,grip.rx,grip.ry,0,0,TAU);c.clip();c.drawImage(img,frame.x,frame.y,frame.w,frame.h);c.restore();}c.restore();
       if(p.shield>1){c.strokeStyle='#9be8ff66';c.lineWidth=2;c.beginPath();c.arc(0,-10,37,0,TAU);c.stroke();}
     }
+    summonedCreature(e){
+      const asset=NecroCreatureArt.assets[e.type],img=this.summonSprites.get(e.type);if(!asset||!img?.complete||!img.naturalWidth)return false;
+      const c=this.ctx,scale=e.elite?1.65:e.leader?1.2:1,motion=this.minionMotion.get(e),pose=NecroMotion.pose(motion),floating=e.type==='spirit';
+      c.save();c.scale(scale,scale);this.ellipse(0,19,17,5,'#08071277');c.strokeStyle=e.elite?'#e5c384aa':'#75ead780';c.lineWidth=e.elite?2:1;c.beginPath();c.ellipse(0,18,19,6,0,0,TAU);c.stroke();
+      c.save();c.translate(0,this.reduced?0:floating?-3+Math.sin(this.t*3+(e.phase||0))*2.2:pose.bob);c.scale(motion?.facing||1,1);
+      if(e.invuln>0&&Math.floor(this.t*14)%2===0)c.globalAlpha=.72;
+      if(floating)this.glow(0,-14,32,'#92d9ff22');NecroMotion.paint(c,img,asset.frame,asset.rig,motion);c.restore();
+      if(e.elite)this.glyph('seal',0,-51,.5,'#eccc8d');
+      if(e.leader){c.fillStyle='#efd497';c.beginPath();c.moveTo(-10,-46);c.lineTo(-12,-55);c.lineTo(-3,-50);c.lineTo(0,-59);c.lineTo(4,-50);c.lineTo(13,-55);c.lineTo(10,-46);c.closePath();c.fill();}c.restore();
+      if(e.hp<e.maxHp){c.fillStyle='#110c20';c.fillRect(-15,28,30,3);c.fillStyle='#80e9ce';c.fillRect(-15,28,30*Math.max(0,e.hp/e.maxHp),3);}return true;
+    }
+    creaturePortrait(canvas,entry){
+      const previous=this.ctx,c=canvas.getContext('2d');c.clearRect(0,0,canvas.width,canvas.height);c.save();
+      const spec=entry.preview,size=spec.boss||spec.miniBoss?spec.r/21:1;c.translate(canvas.width/2,canvas.height*.68);c.scale(4.1/size,4.1/size);
+      this.ctx=c;try{this.creature({...spec,portrait:true,hp:spec.maxHp||1,maxHp:spec.maxHp||1},entry.friendly);}finally{c.restore();this.ctx=previous;}
+    }
     creature(e,friendly=false,corpse=false){
+      if(friendly&&!corpse&&this.summonedCreature(e))return;
       const c=this.ctx,t=this.t,eScale=e.elite?1.65:e.leader?1.2:1;const size=e.boss||e.miniBoss?e.r/21:1;
       c.save();c.scale(eScale*size,eScale*size);const bob=corpse?0:Math.sin(t*5+(e.phase||0))*1.5;
       this.ellipse(0,15,20,6,'#08071266');
@@ -152,12 +170,13 @@
       if(e.miniBoss&&!corpse){c.fillStyle='#ffd18c';c.beginPath();c.moveTo(-10,-28);c.lineTo(-13,-38);c.lineTo(-4,-33);c.lineTo(0,-43);c.lineTo(5,-33);c.lineTo(13,-38);c.lineTo(10,-28);c.closePath();c.fill();}
       c.restore();
       if(!corpse&&!e.boss&&e.hp<e.maxHp){c.fillStyle='#110c20';c.fillRect(-15,24,30,3);c.fillStyle=friendly?'#80e9ce':'#f7a88f';c.fillRect(-15,24,30*Math.max(0,e.hp/e.maxHp),3);}
-      if(e.miniBoss&&!corpse){c.fillStyle='#f4ce9b';c.font='600 10px Segoe UI';c.textAlign='center';c.fillText('TRÙM NHỎ',0,-62);}
+      if(e.miniBoss&&!corpse&&!e.portrait){c.fillStyle='#f4ce9b';c.font='600 10px Segoe UI';c.textAlign='center';c.fillText('TRÙM NHỎ',0,-62);}
     }
     worldObject(x,y,fn,extent=160){const p=this.point(x,y),margin=Math.max(160,extent*this.zoom);if(p.x< -margin||p.x>this.w+margin||p.y< -margin||p.y>this.h+margin)return;const c=this.ctx;c.save();c.translate(p.x,p.y);c.scale(this.zoom,this.zoom);fn();c.restore();}
     render(game,dt,stage=0,profile){
       this.t+=dt;const c=this.ctx,p=game?.player,config=game?.config||D.stages[stage];
-      this.heroWalking=!!(p&&this.lastHeroPosition&&Math.hypot(p.x-this.lastHeroPosition.x,p.y-this.lastHeroPosition.y)>.02);this.lastHeroPosition=p?{x:p.x,y:p.y}:null;
+      this.heroMotion=NecroMotion.track(this.heroMotion,p,dt,game?.mode==='playing',this.reduced);
+      if(game)for(const m of game.minions)this.minionMotion.set(m,NecroMotion.track(this.minionMotion.get(m),m,dt,game.mode==='playing',this.reduced));
       if(p){this.camera.x+=(p.x-this.camera.x)*(1-Math.exp(-8*dt));this.camera.y+=(p.y-this.camera.y)*(1-Math.exp(-8*dt));}else this.camera={x:0,y:0};
       this.shake=Math.max(0,this.shake-dt*20);this.sx=this.shake?(Math.random()-.5)*this.shake:0;this.sy=this.shake?(Math.random()-.5)*this.shake:0;
       c.setTransform(this.dpr,0,0,this.dpr,0,0);this.background(config);

@@ -4,11 +4,11 @@
   const timeText=t=>String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');
   const storage={get(k,v){try{return localStorage.getItem(k)??v;}catch{return v;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch{return false;}}};
   let profile;try{profile=P.normalize(JSON.parse(storage.get('necro.profile','null')));}catch{profile=P.normalize();}
-  let autoEnabled=storage.get('necro.autoSummon','off')==='on',metaSection=null,shopKind='weapon',saveWarned=false,worldOpen=false;
+  let autoEnabled=storage.get('necro.autoSummon','off')==='on',metaSection=null,shopKind='weapon',saveWarned=false,worldOpen=false,bestiaryOpen=false,bestiaryKind='summons',bestiaryPortraits=[];
   let completed=[];try{const list=JSON.parse(storage.get('necro.completed','[]'));if(Array.isArray(list))completed=list.filter(v=>Number.isInteger(v)&&v>=0&&v<5);}catch{}
   let selected=clamp(Number(storage.get('necro.stage','0'))||0,0,4),game=null,lastMode='',previous=0,hudClock=0,speed=1,toastUntil=0;
   let soundOn=storage.get('necro.sound','off')==='on',audio=null,joystick=null,lastMove={x:0,y:1},helpPrevious=null,flashUntil=0;
-  const keys=new Set(),screens=['welcome','menu-caption','stage-picker','hud','play-bottom','side-info','item-rack','boss-list','world-screen','meta-screen','upgrade-screen','pause-screen','end-screen'];
+  const keys=new Set(),screens=['welcome','menu-caption','stage-picker','hud','play-bottom','side-info','item-rack','boss-list','world-screen','bestiary-screen','meta-screen','upgrade-screen','pause-screen','end-screen'];
   const show=(id,on)=>$(id).classList.toggle('hidden',!on);
   new ResizeObserver(()=>renderer.resize()).observe(canvas.parentElement);
   function initAudio(){if(!soundOn)return;try{audio ||= new (window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume().catch(()=>{});}catch{soundOn=false;soundUI();}}
@@ -25,6 +25,20 @@
   function bankGold(){if(game&&P.bankRunGold(profile,game)){saveProfile();profileUI();}}
   function openWorld(){if(game)return;worldOpen=true;show('world-screen',true);$('close-world').focus();}
   function closeWorld(){worldOpen=false;show('world-screen',false);$('open-world').focus();}
+  function openBestiary(){if(game)return;bestiaryOpen=true;renderBestiary();show('bestiary-screen',true);$('close-bestiary').focus();}
+  function closeBestiary(){bestiaryOpen=false;show('bestiary-screen',false);$('open-bestiary').focus();}
+  function renderBestiary(){
+    const entries=NecroBestiary.entries(bestiaryKind);bestiaryPortraits=[];
+    for(const kind of ['summons','enemies','bosses']){const active=kind===bestiaryKind,b=$('bestiary-'+kind);b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;}
+    $('bestiary-grid').setAttribute('aria-labelledby','bestiary-'+bestiaryKind);$('bestiary-note').textContent=NecroBestiary.notes[bestiaryKind];
+    $('bestiary-grid').replaceChildren(...entries.map(entry=>{
+      const card=document.createElement('article');card.className='bestiary-card';card.style.setProperty('--creature-color',entry.color);
+      card.innerHTML='<div class="bestiary-card-top"><span>'+entry.role+'</span><small>'+entry.title+'</small></div><canvas width="400" height="340" aria-hidden="true"></canvas><h3>'+entry.name+'</h3>'+(entry.lore?'<p class="creature-lore">'+entry.lore+'</p>':'')+'<dl>'+entry.stats.map(([label,value])=>'<div><dt>'+label+'</dt><dd>'+value+'</dd></div>').join('')+'</dl><h4>Khả năng</h4><p>'+entry.behavior+'</p><div class="creature-tip"><b>Mẹo pháp sư</b><p>'+entry.tip+'</p></div>';
+      bestiaryPortraits.push({canvas:card.querySelector('canvas'),entry});return card;
+    }));
+    $('bestiary-grid').parentElement.scrollTop=0;paintBestiary();
+  }
+  function paintBestiary(){for(const {canvas,entry} of bestiaryPortraits)renderer.creaturePortrait(canvas,entry);}
   function worldUI(){
     $('world-story').textContent=D.world.story;
     $('world-details').innerHTML=D.world.details.map(d=>'<article><span>'+NecroRelicArt.icon(d.kind)+'</span><h3>'+d.title+'</h3><p>'+d.text+'</p></article>').join('');
@@ -61,7 +75,7 @@
   function movement(){let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),y=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0);if(joystick){x+=joystick.dx/40;y+=joystick.dy/40;}const l=Math.hypot(x,y);if(l>1){x/=l;y/=l;}if(l>.05)lastMove={x:x/Math.hypot(x,y),y:y/Math.hypot(x,y)};return{x,y};}
   function notice(text){$('toast').textContent=text;show('toast',true);$('toast').classList.add('visible');toastUntil=performance.now()+4200;}
   function start(){
-    bankGold();initAudio();resetInput();game=new Game(selected,Math.random,profile);game.setAutoSummon(autoEnabled);speed=Number($('speed').value)||1;lastMode='';lastMove={x:0,y:1};helpPrevious=null;metaSection=null;worldOpen=false;show('help-screen',false);
+    bankGold();initAudio();resetInput();game=new Game(selected,Math.random,profile);game.setAutoSummon(autoEnabled);speed=Number($('speed').value)||1;lastMode='';lastMove={x:0,y:1};helpPrevious=null;metaSection=null;worldOpen=false;bestiaryOpen=false;show('help-screen',false);
     $('hero-skill').querySelector('.hero-skill-icon').innerHTML=game.loadout.hero.ability.icon;
     renderer.particles=[];renderer.rings=[];renderer.numbers=[];renderer.threads=[];renderer.camera={x:0,y:0};renderer.shake=0;
     for(const id of screens)show(id,['hud','play-bottom','side-info','item-rack'].includes(id));
@@ -69,18 +83,18 @@
     $('damage-flash').classList.remove('flash');document.body.classList.add('playing');hud();syncMode();canvas.focus({preventScroll:true});
     notice(autoEnabled?'Auto đang bật · Bạn di chuyển, quân đoàn sẽ tự được triệu hồi.':'Bấm AUTO cạnh ba phép để tự triệu hồi, hoặc dùng phím 1 / 2 / 3.');tone(330,.2,.04,220);
   }
-  function menu(){bankGold();resetInput();game=null;lastMode='';helpPrevious=null;metaSection=null;show('help-screen',false);document.body.classList.remove('playing');for(const id of screens)show(id,['welcome','menu-caption','stage-picker'].includes(id));$('pause').disabled=true;$('toast').classList.remove('visible');$('damage-flash').classList.remove('flash');stageCards();profileUI();$('start').focus();}
+  function menu(){bankGold();resetInput();game=null;lastMode='';helpPrevious=null;metaSection=null;worldOpen=false;bestiaryOpen=false;show('help-screen',false);document.body.classList.remove('playing');for(const id of screens)show(id,['welcome','menu-caption','stage-picker'].includes(id));$('pause').disabled=true;$('toast').classList.remove('visible');$('damage-flash').classList.remove('flash');stageCards();profileUI();$('start').focus();}
   function pause(){if(!game||helpPrevious!==null)return;if(game.mode==='playing'){game.mode='paused';resetInput();}else if(game.mode==='paused')game.mode='playing';syncMode();}
   function pauseDetails(){const p=game.player;$('pause-summary').textContent=D.stages[selected].name+' · Cấp '+game.level+' · '+timeText(game.time)+(speed>1?' · Tốc độ '+speed+'×':'')+' · '+game.loadout.hero.name+' / '+game.loadout.weapon.name+' · Hồi sinh còn '+p.reviveCharges+' lượt';const entries=Object.entries(p.upgrades);
     $('owned-upgrades').replaceChildren(...entries.map(([id,n])=>{const u=D.upgrades.find(x=>x.id===id),s=document.createElement('span');s.textContent=u.name+(n>1?' · '+n:'');s.title=u.desc;return s;}));
     if(!entries.length){const s=document.createElement('span');s.textContent='Chưa có nâng cấp. Nhặt đủ tinh thể để chọn khế ước đầu tiên.';$('owned-upgrades').append(s);}
   }
   function help(){if(helpPrevious!==null)return;helpPrevious=game?game.mode:'menu';if(game?.mode==='playing')game.mode='paused';resetInput();show('help-screen',true);$('close-help').focus();}
-  function closeHelp(){if(helpPrevious===null)return;if(game&&helpPrevious==='playing')game.mode='playing';helpPrevious=null;show('help-screen',false);syncMode();if(game?.mode==='playing')canvas.focus({preventScroll:true});else if(game?.mode==='paused')$('resume').focus();else if(game?.mode==='upgrade')$('upgrade-cards').firstElementChild?.focus();else if(worldOpen)$('close-world').focus();else if(metaSection!==null)$('close-meta').focus();else $('help').focus();}
+  function closeHelp(){if(helpPrevious===null)return;if(game&&helpPrevious==='playing')game.mode='playing';helpPrevious=null;show('help-screen',false);syncMode();if(game?.mode==='playing')canvas.focus({preventScroll:true});else if(game?.mode==='paused')$('resume').focus();else if(game?.mode==='upgrade')$('upgrade-cards').firstElementChild?.focus();else if(bestiaryOpen)$('close-bestiary').focus();else if(worldOpen)$('close-world').focus();else if(metaSection!==null)$('close-meta').focus();else $('help').focus();}
   function choose(i){if(!game||helpPrevious!==null)return;if(game.choose(i)){resetInput();tone(650,.16,.04,250);syncMode();hud();}}
   function summon(type){if(!game||helpPrevious!==null)return;const result=game.summon(type);if(result.ok){tone(type==='spirit'?500:300,.22,.04,300);notice('Đã gọi '+result.count+' '+D.summons[type].name.toLowerCase()+' · −'+result.mana+' mana'+(result.groups.length?' · Hợp nhất '+result.groups.length+' đệ khổng lồ':'')+(result.leader?' · Thủ lĩnh thức tỉnh!':''));}hud();canvas.focus({preventScroll:true});}
   function summonButtons(){
-    $('summon-bar').replaceChildren(...Object.entries(D.summons).map(([type,s],i)=>{const b=document.createElement('button');b.className='summon-skill';b.dataset.type=type;b.id='summon-'+type;b.innerHTML='<span class="skill-icon">'+s.icon+'</span><span class="skill-info"><b>'+s.name+'</b><small><span class="mana-cost">'+s.mana/5+' MP/đệ</span> · <span class="corpse-mini">0/5 xác</span></small><span class="skill-state">Chưa có xác</span></span><kbd>'+(i+1)+'</kbd><i class="skill-fill"></i>';b.title=s.role;b.onclick=()=>summon(type);return b;}));
+    $('summon-bar').replaceChildren(...Object.entries(D.summons).map(([type,s],i)=>{const b=document.createElement('button');b.className='summon-skill';b.dataset.type=type;b.id='summon-'+type;b.innerHTML='<span class="skill-icon">'+NecroCreatureArt.portrait(type)+'</span><span class="skill-info"><b>'+s.name+'</b><small><span class="mana-cost">'+s.mana/5+' MP/đệ</span> · <span class="corpse-mini">0/5 xác</span></small><span class="skill-state">Chưa có xác</span></span><kbd>'+(i+1)+'</kbd><i class="skill-fill"></i>';b.title=s.role;b.onclick=()=>summon(type);return b;}));
   }
   function itemButtons(){
     $('item-buttons').replaceChildren(...Object.entries(D.items).map(([type,s])=>{const slot=document.createElement('div');slot.className='item-slot';slot.innerHTML='<button class="item-circle" id="item-'+type+'" style="--item-color:'+s.color+'">'+s.icon+'<kbd>'+s.key+'</kbd><span class="item-stock">0</span><span class="item-timer"></span></button><b>'+s.name+'</b><small class="item-uses">0/3 lượt</small>';slot.querySelector('button').onclick=()=>useItem(type);return slot;}));
@@ -137,20 +151,25 @@
     if(game?.mode==='playing'&&helpPrevious===null){let remaining=dt*speed;const input=movement();while(remaining>0&&game.mode==='playing'){const step=Math.min(remaining,1/40);game.step(step,input);remaining-=step;}}
     if(game){bankGold();events();syncMode();hudClock-=dt;if(hudClock<=0){hud();hudClock=.1;}}
     if(toastUntil&&t>toastUntil){$('toast').classList.remove('visible');toastUntil=0;}if(flashUntil&&t>flashUntil){$('damage-flash').classList.remove('flash');flashUntil=0;}
-    renderer.render(game,dt,selected,profile);requestAnimationFrame(frame);
+    renderer.render(game,dt,selected,profile);if(bestiaryOpen)paintBestiary();requestAnimationFrame(frame);
   }
   $('start').onclick=start;$('again').onclick=start;$('restart').onclick=start;$('resume').onclick=pause;$('pause').onclick=pause;
   $('leave').onclick=menu;$('home').onclick=menu;$('help').onclick=help;$('close-help').onclick=closeHelp;
   $('auto-summon').onclick=toggleAuto;$('open-power').onclick=()=>openMeta('power');$('open-shop').onclick=()=>openMeta('shop');$('close-meta').onclick=closeMeta;
   $('hero-skill').onclick=castHeroSkill;$('open-world').onclick=openWorld;$('close-world').onclick=closeWorld;
+  $('open-bestiary').onclick=openBestiary;$('close-bestiary').onclick=closeBestiary;
+  for(const kind of ['summons','enemies','bosses']){
+    const tab=$('bestiary-'+kind);tab.onclick=()=>{bestiaryKind=kind;renderBestiary();tab.focus();};
+    tab.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const kinds=['summons','enemies','bosses'],index=kinds.indexOf(bestiaryKind);bestiaryKind=e.key==='Home'?'summons':e.key==='End'?'bosses':kinds[(index+(e.key==='ArrowLeft'?2:1))%3];renderBestiary();$('bestiary-'+bestiaryKind).focus();});
+  }
   $('shop-weapons').onclick=()=>{shopKind='weapon';renderMeta();$('shop-weapons').focus();};$('shop-heroes').onclick=()=>{shopKind='hero';renderMeta();$('shop-heroes').focus();};
   for(const id of ['shop-weapons','shop-heroes'])$(id).addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();shopKind=e.key==='Home'?'weapon':e.key==='End'?'hero':shopKind==='weapon'?'hero':'weapon';renderMeta();$(shopKind==='weapon'?'shop-weapons':'shop-heroes').focus();}});
   $('build-button').onclick=()=>{if(game?.mode==='playing')pause();};$('dash-status').onclick=()=>{if(game?.mode==='playing'&&helpPrevious===null){game.dash(lastMove);canvas.focus({preventScroll:true});}};$('next-stage').onclick=()=>{selected=Math.min(4,selected+1);storage.set('necro.stage',String(selected));stageCards();start();};
   document.addEventListener('keydown',e=>{
     const active=game&&['playing','paused','upgrade'].includes(game.mode);
     if(active&&['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyT','KeyQ','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6'].includes(e.code))e.preventDefault();
-    if(e.code==='Escape'&&!e.repeat){if(helpPrevious!==null)closeHelp();else if(worldOpen)closeWorld();else if(metaSection!==null)closeMeta();else pause();return;}
-    if(e.code==='Tab'){const dialogs=[...document.querySelectorAll('.scrim:not(.hidden)')],dialog=helpPrevious!==null?$('help-screen'):dialogs.at(-1);if(!dialog)return;const buttons=[...dialog.querySelectorAll('button:not(.hidden):not(:disabled)')].filter(b=>b.getClientRects().length);const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}return;}
+    if(e.code==='Escape'&&!e.repeat){if(helpPrevious!==null)closeHelp();else if(bestiaryOpen)closeBestiary();else if(worldOpen)closeWorld();else if(metaSection!==null)closeMeta();else pause();return;}
+    if(e.code==='Tab'){const dialogs=[...document.querySelectorAll('.scrim:not(.hidden)')],dialog=helpPrevious!==null?$('help-screen'):dialogs.at(-1);if(!dialog)return;const buttons=[...dialog.querySelectorAll('button:not(.hidden):not(:disabled)')].filter(b=>b.tabIndex>=0&&b.getClientRects().length);const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}return;}
     if(helpPrevious!==null)return;
     if(game?.mode==='upgrade'&&!e.repeat&&/^(Digit|Numpad)[123]$/.test(e.code)){choose(Number(e.code.slice(-1))-1);return;}
     if(game?.mode==='playing'){keys.add(e.code);if(!e.repeat){if(e.code==='Space')game.dash(lastMove);if(e.code==='KeyT')toggleAuto();if(e.code==='KeyQ')castHeroSkill();const digit=/^(Digit|Numpad)[123456]$/.test(e.code)?Number(e.code.slice(-1)):0;if(digit&&digit<=3)summon(['zombie','skeleton','spirit'][digit-1]);else if(digit)useItem(['magnet','bomb','book'][digit-4]);}}
