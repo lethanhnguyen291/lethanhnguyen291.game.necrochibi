@@ -6,6 +6,14 @@
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
   const BOOK_GAIN=['maxHp','maxMana','damage','speed','manaRegen','regen','magnet','summonRange','minionPower','minionHealth','armor'];
   const BOOK_FASTER=['fireInterval','dashMax','summonCooldown','heroSkillCooldown'];
+  function encounterAt(time,difficulty=1){
+    const t=clamp(time,0,600),late=clamp((t-360)/120,0,1),tier=Math.min(4,Math.floor(t/120));
+    return{tier,health:difficulty*(1+Math.min(t,360)/500+Math.max(0,t-360)/1800),heavyHealth:{eater:1-late*.1,knight:1-late*.2},
+      cap:time>=600?90:time>=360?110:145,count:time>=600?2:time>=420?4:time>=360?3:Math.min(5,1+Math.floor(t/130)),
+      interval:(time>=600?1.12:time>=420?.9:time>=360?.98:Math.max(.55,1.05-t*.0007))/Math.sqrt(difficulty),
+      resting:time>=420&&time<600&&(time-420)%28>=23,
+      weights:[[1,0,0,0,0],[.425,.575,0,0,0],[11/30,7/60,31/60,0,0],[.37,.2,.17,.26,0],[.28,.18,.14,.18,.22]][tier]};
+  }
   class Game{
     constructor(stage=0,random=Math.random,profile){
       this.random=random;this.stage=clamp(stage|0,0,4);this.config=D.stages[this.stage];this.mode='playing';
@@ -154,12 +162,13 @@
       m.hp=m.maxHp*ratio;m.damage=s.damage*p.minionPower*growth*(m.elite?2.7:1)*(m.leader?1.2:1);m.r=m.elite?22:m.leader?16:12;
     }
     spawnEnemy(type='slime',position){
-      if(this.enemies.filter(e=>!e.dead).length>=145)return null;
+      const wave=encounterAt(this.time,this.config.difficulty);
+      if(this.enemies.filter(e=>!e.dead&&!e.boss&&!e.miniBoss).length>=wave.cap)return null;
       const spec=D.enemies[type];if(!spec)return null;
       const a=this.random()*TAU,r=this.spawnRadius+this.random()*70,p=this.player;
       let pos=position||{x:p.x+Math.cos(a)*r,y:p.y+Math.sin(a)*r};
       if(this.firewall&&!position){pos=this.ringPosition(a,this.firewall.r-35);}
-      const scale=this.config.difficulty*(1+Math.min(this.time,600)/500);
+      const scale=wave.health*(wave.heavyHealth[type]||1);
       const e={id:++this.id,type,...spec,x:pos.x,y:pos.y,hp:spec.hp*scale,maxHp:spec.hp*scale,damage:spec.damage*this.config.difficulty,speed:spec.speed,attack:1+this.random(),contactCooldown:0,hit:0,slow:0,marked:0,dead:false,phase:this.random()*TAU,eaten:0};
       this.bound(e);this.enemies.push(e);return e;
     }
@@ -366,7 +375,7 @@
       const cells=new Map(),size=75;
       for(const e of this.enemies){if(e.dead)continue;const cx=Math.floor(e.x/size),cy=Math.floor(e.y/size);
         for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(const b of cells.get((cx+dx)+','+(cy+dy))||[]){
-          const x=e.x-b.x,y=e.y-b.y,min=(e.r+b.r)*.75,d=Math.hypot(x,y);if(d<min&&d>.01){const shift=(min-d)*.45,nx=x/d*shift,ny=y/d*shift;if(!e.boss){e.x+=nx;e.y+=ny;}if(!b.boss){b.x-=nx;b.y-=ny;}}
+          const x=e.x-b.x,y=e.y-b.y,min=(e.r+b.r)*.75,square=x*x+y*y;if(square<min*min&&square>.0001){const d=Math.sqrt(square),shift=(min-d)*.45,nx=x/d*shift,ny=y/d*shift;if(!e.boss){e.x+=nx;e.y+=ny;}if(!b.boss){b.x-=nx;b.y-=ny;}}
         }
         const key=cx+','+cy;if(!cells.has(key))cells.set(key,[]);cells.get(key).push(e);
       }
@@ -408,7 +417,8 @@
     updateBullets(dt){
       for(const b of this.bullets){
         if(b.dead||this.mode!=='playing')continue;const ox=b.x,oy=b.y;b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
-        const hitCircle=e=>{const vx=b.x-ox,vy=b.y-oy,l=vx*vx+vy*vy,t=l?clamp(((e.x-ox)*vx+(e.y-oy)*vy)/l,0,1):0;return Math.hypot(e.x-ox-vx*t,e.y-oy-vy*t)<e.r+b.r;};
+        const vx=b.x-ox,vy=b.y-oy,l=vx*vx+vy*vy;
+        const hitCircle=e=>{const t=l?clamp(((e.x-ox)*vx+(e.y-oy)*vy)/l,0,1):0,dx=e.x-ox-vx*t,dy=e.y-oy-vy*t,r=e.r+b.r;return dx*dx+dy*dy<r*r;};
         if(b.kind==='hostile'){
           let hit=false;for(const m of this.minions){if(!m.dead&&m.type!=='spirit'&&hitCircle(m)){this.hurtMinion(m,b.damage);hit=true;break;}}
           if(!hit&&hitCircle(this.player)){this.hurtPlayer(b.damage);hit=true;}if(hit)b.dead=true;
@@ -456,10 +466,9 @@
       if(this.firewall){const f=this.firewall,d=distance(p,f),edge=f.r-p.r;if(d>edge){p.x=f.x+(p.x-f.x)/d*edge;p.y=f.y+(p.y-f.y)/d*edge;this.hurtPlayer(16);}}
       this.shootClock-=dt;if(this.shootClock<=0){this.staffAttack();this.shootClock=p.fireInterval;}
       this.spawnClock-=dt;if(this.spawnClock<=0){
-        const tier=Math.min(4,Math.floor(this.time/120)),count=this.time>=600?2:Math.min(5,1+Math.floor(this.time/130));
-        const types=Object.keys(D.enemies);
-        for(let i=0;i<count;i++){const r=this.random(),t=r<.4?tier:r<.65?0:Math.floor(this.random()*(tier+1));this.spawnEnemy(types[t]);}
-        this.spawnClock=Math.max(.55,1.05-this.time*.0007)/Math.sqrt(this.config.difficulty);
+        const wave=encounterAt(this.time,this.config.difficulty),types=Object.keys(D.enemies);
+        if(!wave.resting)for(let i=0;i<wave.count;i++){let roll=this.random(),rank=0;while(rank<wave.tier&&roll>=wave.weights[rank])roll-=wave.weights[rank++];this.spawnEnemy(types[rank]);}
+        this.spawnClock=wave.interval;
       }
       [180,360,600].forEach((time,index)=>{if(this.time+.000001>=time&&!this.bossSpawned[index])this.spawnBoss(index);});
       this.updateHeroEffects(dt);this.updateEnemies(dt);if(this.mode!=='playing'){this.clean();return;}
@@ -469,9 +478,9 @@
       this.enemies=this.enemies.filter(e=>!e.dead);this.corpses=this.corpses.filter(c=>!c.dead);this.minions=this.minions.filter(m=>!m.dead);
       this.bullets=this.bullets.filter(b=>!b.dead&&b.life>0);this.drops=this.drops.filter(g=>!g.dead);this.zones=this.zones.filter(z=>z.life>0);this.warnings=this.warnings.filter(w=>!w.dead);
       this.effects=this.effects.filter(f=>f.life>.000001);
-      // Combine nearby EXP only; actual corpses keep their configured lifetime.
-      if(this.drops.length>650){const cells=new Map();this.drops=this.drops.filter(g=>{if(g.kind!=='xp'||g.pull)return true;const key=Math.floor(g.x/80)+','+Math.floor(g.y/80),old=cells.get(key);if(old){old.value+=g.value;return false;}cells.set(key,g);return true;});}
+      // Compact uncollected resources without discarding value, items or corpses.
+      if(this.drops.length>180){const cells=new Map();this.drops=this.drops.filter(g=>{if(!['xp','gold'].includes(g.kind)||g.pull)return true;const key=g.kind+':'+Math.floor(g.x/80)+','+Math.floor(g.y/80),old=cells.get(key);if(old){old.value+=g.value;return false;}cells.set(key,g);return true;});}
     }
   }
-  root.NecroEngine={Game,distance,clamp};if(typeof module!=='undefined')module.exports=root.NecroEngine;
+  root.NecroEngine={Game,distance,clamp,encounterAt};if(typeof module!=='undefined')module.exports=root.NecroEngine;
 })(typeof globalThis!=='undefined'?globalThis:this);

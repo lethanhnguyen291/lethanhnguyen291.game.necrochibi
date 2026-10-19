@@ -1,12 +1,12 @@
 (() => {
   'use strict';
   const $=id=>document.getElementById(id),D=NecroData,P=NecroProgression,{Game,clamp}=NecroEngine,canvas=$('game'),renderer=new NecroRenderer(canvas);
-  const timeText=t=>String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');
+  const clock=new NecroRuntime.FixedClock(),timeText=t=>String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');
   const storage={get(k,v){try{return localStorage.getItem(k)??v;}catch{return v;}},set(k,v){try{localStorage.setItem(k,v);return true;}catch{return false;}}};
   let profile;try{profile=P.normalize(JSON.parse(storage.get('necro.profile','null')));}catch{profile=P.normalize();}
   let autoEnabled=storage.get('necro.autoSummon','off')==='on',metaSection=null,shopKind='weapon',saveWarned=false,worldOpen=false,bestiaryOpen=false,bestiaryKind='summons',bestiaryPortraits=[];
   let completed=[];try{const list=JSON.parse(storage.get('necro.completed','[]'));if(Array.isArray(list))completed=list.filter(v=>Number.isInteger(v)&&v>=0&&v<5);}catch{}
-  let selected=clamp(Number(storage.get('necro.stage','0'))||0,0,4),game=null,lastMode='',previous=0,hudClock=0,speed=1,toastUntil=0;
+  let selected=clamp(Number(storage.get('necro.stage','0'))||0,0,4),game=null,lastMode='',previous=0,lastPaint=0,paintCredit=0,hudClock=0,bankClock=0,speed=1,toastUntil=0;
   let soundOn=storage.get('necro.sound','off')==='on',audio=null,joystick=null,lastMove={x:0,y:1},helpPrevious=null,flashUntil=0;
   const keys=new Set(),screens=['welcome','menu-caption','stage-picker','hud','play-bottom','side-info','item-rack','boss-list','world-screen','bestiary-screen','meta-screen','upgrade-screen','pause-screen','end-screen'];
   const show=(id,on)=>{const node=$(id);node.classList.toggle('hidden',!on);if(node.classList.contains('scrim')){const open=!!document.querySelector('.scrim:not(.hidden)');document.body.classList.toggle('dialog-open',open);document.documentElement.classList.toggle('dialog-open',open);}};
@@ -21,7 +21,7 @@
     for(const e of document.querySelectorAll('[data-wallet]'))e.textContent=profile.gold.toLocaleString('vi-VN');
     const hero=D.heroes.find(h=>h.id===profile.equipped.hero),weapon=D.weapons.find(w=>w.id===profile.equipped.weapon);
     $('menu-loadout').textContent='Đang chọn: '+hero.name+' · '+weapon.name;
-    $('mobile-hero').innerHTML=NecroHeroArt.portrait(hero.id,weapon.id);
+    const portraitKey=hero.id+':'+weapon.id;if($('mobile-hero').dataset.loadout!==portraitKey){$('mobile-hero').innerHTML=NecroHeroArt.portrait(hero.id,weapon.id);$('mobile-hero').dataset.loadout=portraitKey;}
   }
   function bankGold(){if(game&&P.bankRunGold(profile,game)){saveProfile();profileUI();}}
   function openWorld(){if(game)return;worldOpen=true;show('world-screen',true);$('close-world').focus();}
@@ -76,6 +76,7 @@
   function movement(){let x=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),y=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0);if(joystick){x+=joystick.dx/40;y+=joystick.dy/40;}const l=Math.hypot(x,y);if(l>1){x/=l;y/=l;}if(l>.05)lastMove={x:x/Math.hypot(x,y),y:y/Math.hypot(x,y)};return{x,y};}
   function notice(text){$('toast').textContent=text;show('toast',true);$('toast').classList.add('visible');toastUntil=performance.now()+4200;}
   function start(){
+    clock.reset();lastPaint=0;paintCredit=1;bankClock=0;
     bankGold();initAudio();resetInput();game=new Game(selected,Math.random,profile);game.setAutoSummon(autoEnabled);speed=Number($('speed').value)||1;lastMode='';lastMove={x:0,y:1};helpPrevious=null;metaSection=null;worldOpen=false;bestiaryOpen=false;show('help-screen',false);
     $('hero-skill').querySelector('.hero-skill-icon').innerHTML=game.loadout.hero.ability.icon;
     renderer.particles=[];renderer.rings=[];renderer.numbers=[];renderer.threads=[];renderer.camera={x:0,y:0};renderer.shake=0;
@@ -131,10 +132,13 @@
     heroButton.style.setProperty('--ability-color',ability.color);heroButton.querySelector('.hero-skill-name').textContent=ability.short;heroButton.querySelector('.hero-skill-state').textContent=game.heroCooldown>.01?Math.ceil(game.heroCooldown)+'s':ability.mana+' MP';heroButton.querySelector('.hero-skill-fill').style.height=(1-clamp(game.heroCooldown/(ability.cooldown*p.heroSkillCooldown),0,1))*100+'%';heroButton.classList.toggle('blocked',!heroPlan.ok);heroButton.setAttribute('aria-disabled',String(!heroPlan.ok));heroButton.setAttribute('aria-label',ability.name+': '+(heroPlan.ok?'sẵn sàng':heroPlan.reason));heroButton.title='Q · '+ability.name+' · '+ability.desc+' '+(heroPlan.ok?'':heroPlan.reason);
     $('build').textContent=game.loadout.weapon.special.name+' · '+game.weaponHits+'/'+game.loadout.weapon.special.every+' đòn trúng';
     const bosses=game.enemies.filter(e=>e.boss);show('boss-list',bosses.length>0);
-    $('boss-list').replaceChildren(...bosses.map(e=>{const b=document.createElement('div');b.className='boss-item';const title=document.createElement('div');title.innerHTML='<span>♛ '+e.name+'</span><span>'+Math.ceil(e.hp/e.maxHp*100)+'%</span>';const bar=document.createElement('div');bar.className='boss-meter';const fill=document.createElement('i');fill.style.width=e.hp/e.maxHp*100+'%';bar.append(fill);b.append(title,bar);return b;}));
+    const list=$('boss-list'),bossKey=bosses.map(e=>e.id).join(',');
+    if(list.dataset.bosses!==bossKey){list.replaceChildren(...bosses.map(e=>{const b=document.createElement('div');b.className='boss-item';const title=document.createElement('div');title.innerHTML='<span>♛ '+e.name+'</span><span></span>';const bar=document.createElement('div');bar.className='boss-meter';bar.append(document.createElement('i'));b.append(title,bar);return b;}));list.dataset.bosses=bossKey;}
+    bosses.forEach((e,i)=>{const b=list.children[i];b.querySelector('div>span:last-child').textContent=Math.ceil(e.hp/e.maxHp*100)+'%';b.querySelector('i').style.width=e.hp/e.maxHp*100+'%';});
   }
   function syncMode(){
     if(!game||game.mode===lastMode)return;lastMode=game.mode;
+    clock.reset();if(game.mode!=='playing')bankGold();
     show('upgrade-screen',game.mode==='upgrade');show('pause-screen',game.mode==='paused');show('end-screen',['won','lost'].includes(game.mode));
     $('pause').textContent=game.mode==='paused'?'▶':'Ⅱ';$('pause').setAttribute('aria-label',game.mode==='paused'?'Tiếp tục':'Tạm dừng');$('pause').disabled=!['playing','paused'].includes(game.mode);
     if(game.mode==='playing')canvas.focus({preventScroll:true});
@@ -149,11 +153,13 @@
   }
   function events(){for(const e of game.drainEvents()){renderer.event(e);if(['notice','boss','miniBoss'].includes(e.type))notice(e.text);if(e.type==='hurt'){flashUntil=performance.now()+140;$('damage-flash').classList.add('flash');tone(140,.12,.03,-60);}if(e.type==='shot')tone(750,.035,.008,-320);if(e.type==='xp')tone(900,.05,.012);if(e.type==='level')tone(550,.25,.04,300);}}
   function frame(t){
-    const dt=Math.min((t-previous)/1000||0,.05);previous=t;
-    if(game?.mode==='playing'&&helpPrevious===null){let remaining=dt*speed;const input=movement();while(remaining>0&&game.mode==='playing'){const step=Math.min(remaining,1/40);game.step(step,input);remaining-=step;}}
-    if(game){bankGold();events();syncMode();hudClock-=dt;if(hudClock<=0){hud();hudClock=.1;}}
+    const dt=previous?Math.min(Math.max(0,(t-previous)/1000),.1):0;previous=t;
+    const active=()=>game?.mode==='playing'&&helpPrevious===null,input=movement();
+    clock.advance(dt,speed,active,step=>game.step(step,input));renderer.observeFrame(dt,active());
+    if(game){bankClock-=dt;if(bankClock<=0){bankGold();bankClock=.5;}events();syncMode();hudClock-=dt;if(hudClock<=0){hud();hudClock=.1;}}
     if(toastUntil&&t>toastUntil){$('toast').classList.remove('visible');toastUntil=0;}if(flashUntil&&t>flashUntil){$('damage-flash').classList.remove('flash');flashUntil=0;}
-    renderer.render(game,dt,selected,profile);if(bestiaryOpen)paintBestiary();requestAnimationFrame(frame);
+    const fps=active()?60:game||bestiaryOpen?15:30;
+    paintCredit+=dt;if(paintCredit+1e-6>=1/fps){renderer.render(game,lastPaint?Math.min((t-lastPaint)/1000,.1):0,selected,profile);if(bestiaryOpen)paintBestiary();lastPaint=t;paintCredit=Math.max(0,paintCredit-1/fps)%(1/fps);}requestAnimationFrame(frame);
   }
   $('start').onclick=start;$('again').onclick=start;$('restart').onclick=start;$('resume').onclick=pause;$('pause').onclick=pause;
   $('leave').onclick=menu;$('home').onclick=menu;$('help').onclick=help;$('close-help').onclick=closeHelp;
