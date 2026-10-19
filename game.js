@@ -9,7 +9,7 @@
   let selected=clamp(Number(storage.get('necro.stage','0'))||0,0,4),game=null,lastMode='',previous=0,hudClock=0,speed=1,toastUntil=0;
   let soundOn=storage.get('necro.sound','off')==='on',audio=null,joystick=null,lastMove={x:0,y:1},helpPrevious=null,flashUntil=0;
   const keys=new Set(),screens=['welcome','menu-caption','stage-picker','hud','play-bottom','side-info','item-rack','boss-list','world-screen','bestiary-screen','meta-screen','upgrade-screen','pause-screen','end-screen'];
-  const show=(id,on)=>$(id).classList.toggle('hidden',!on);
+  const show=(id,on)=>{const node=$(id);node.classList.toggle('hidden',!on);if(node.classList.contains('scrim')){const open=!!document.querySelector('.scrim:not(.hidden)');document.body.classList.toggle('dialog-open',open);document.documentElement.classList.toggle('dialog-open',open);}};
   new ResizeObserver(()=>renderer.resize()).observe(canvas.parentElement);
   function initAudio(){if(!soundOn)return;try{audio ||= new (window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume().catch(()=>{});}catch{soundOn=false;soundUI();}}
   function tone(f,d=.1,volume=.03,slide=0){if(!soundOn||!audio||audio.state!=='running')return;try{const t=audio.currentTime,o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.setValueAtTime(f,t);if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(35,f+slide),t+d);g.gain.setValueAtTime(volume,t);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+d+.02);}catch{}}
@@ -21,6 +21,7 @@
     for(const e of document.querySelectorAll('[data-wallet]'))e.textContent=profile.gold.toLocaleString('vi-VN');
     const hero=D.heroes.find(h=>h.id===profile.equipped.hero),weapon=D.weapons.find(w=>w.id===profile.equipped.weapon);
     $('menu-loadout').textContent='Đang chọn: '+hero.name+' · '+weapon.name;
+    $('mobile-hero').innerHTML=NecroHeroArt.portrait(hero.id,weapon.id);
   }
   function bankGold(){if(game&&P.bankRunGold(profile,game)){saveProfile();profileUI();}}
   function openWorld(){if(game)return;worldOpen=true;show('world-screen',true);$('close-world').focus();}
@@ -116,11 +117,12 @@
       b.querySelector('.skill-fill').style.width=(1-cd/(s.cooldown*p.summonCooldown))*100+'%';b.setAttribute('aria-label','Triệu hồi '+s.name+': '+(plan.ok?'sẵn sàng':plan.reason));b.title=s.role+' · '+s.hp+' máu / '+s.damage+' sát thương cơ bản'+(plan.ok?'':'. '+plan.reason);
     }
     $('dash-status').textContent=p.dash>.01?'Lướt hồi '+Math.ceil(p.dash)+'s':'Lướt sẵn sàng';
-    $('gold-count').textContent=game.gold;
+    $('mobile-dash').querySelector('small').textContent=p.dash>.01?'Hồi '+Math.ceil(p.dash)+'s':'Sẵn sàng';$('mobile-dash').setAttribute('aria-disabled',String(p.dash>.01));
+    $('gold-count').textContent=game.gold;$('mobile-gold').textContent=game.gold;
     $('auto-summon').setAttribute('aria-pressed',String(game.autoSummon));$('auto-summon').classList.toggle('enabled',game.autoSummon);$('auto-summon').querySelector('small').textContent=game.autoSummon?'BẬT':'TẮT';
     $('auto-summon').title=game.autoSummon?'Auto bật · Chờ gọi '+D.summons[['zombie','skeleton','spirit'][game.autoIndex]].name+'. Cần xác, mana và hết hồi chiêu. Bấm T để tắt.':'Tự động luân phiên 3 phép triệu hồi (T)';
     for(const [type,s] of Object.entries(D.items)){const b=$('item-'+type),plan=game.itemPlan(type),slot=b.parentElement;
-      b.querySelector('.item-stock').textContent=game.inventory[type];slot.querySelector('.item-uses').textContent=game.itemUses[type]+'/3 đã dùng';
+      b.querySelector('.item-stock').textContent=game.inventory[type];slot.querySelector('.item-uses').textContent=game.itemUses[type]+'/3 đã dùng';slot.querySelector('.item-uses').dataset.usage=game.itemUses[type]+'/3 dùng';
       b.querySelector('.item-timer').textContent=type==='book'&&game.bookActive?Math.ceil(game.bookRemaining)+'s':'';
       b.classList.toggle('active',type==='book'&&game.bookActive);b.classList.toggle('unavailable',!plan.ok);b.setAttribute('aria-disabled',String(!plan.ok));
       b.setAttribute('aria-label',s.name+': '+game.inventory[type]+' đang có, '+game.itemUses[type]+'/3 đã dùng'+(type==='book'&&game.bookActive?', còn '+Math.ceil(game.bookRemaining)+' giây':''));b.title=s.description+' · Phím '+s.key+(plan.ok?'':'. '+plan.reason);
@@ -164,7 +166,7 @@
   }
   $('shop-weapons').onclick=()=>{shopKind='weapon';renderMeta();$('shop-weapons').focus();};$('shop-heroes').onclick=()=>{shopKind='hero';renderMeta();$('shop-heroes').focus();};
   for(const id of ['shop-weapons','shop-heroes'])$(id).addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();shopKind=e.key==='Home'?'weapon':e.key==='End'?'hero':shopKind==='weapon'?'hero':'weapon';renderMeta();$(shopKind==='weapon'?'shop-weapons':'shop-heroes').focus();}});
-  $('build-button').onclick=()=>{if(game?.mode==='playing')pause();};$('dash-status').onclick=()=>{if(game?.mode==='playing'&&helpPrevious===null){game.dash(lastMove);canvas.focus({preventScroll:true});}};$('next-stage').onclick=()=>{selected=Math.min(4,selected+1);storage.set('necro.stage',String(selected));stageCards();start();};
+  $('build-button').onclick=()=>{if(game?.mode==='playing')pause();};$('dash-status').onclick=()=>{if(game?.mode==='playing'&&helpPrevious===null){game.dash(lastMove);canvas.focus({preventScroll:true});}};$('mobile-dash').onclick=()=>{$('dash-status').click();hud();};$('next-stage').onclick=()=>{selected=Math.min(4,selected+1);storage.set('necro.stage',String(selected));stageCards();start();};
   document.addEventListener('keydown',e=>{
     const active=game&&['playing','paused','upgrade'].includes(game.mode);
     if(active&&['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','KeyT','KeyQ','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6'].includes(e.code))e.preventDefault();

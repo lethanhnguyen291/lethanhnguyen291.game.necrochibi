@@ -8,8 +8,8 @@
       for(const [type,asset] of Object.entries(NecroCreatureArt.assets)){const img=new Image();img.src=asset.src;this.summonSprites.set(type,img);}
       for(const weapon of D.weapons){const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(NecroRelicArt.svg(weapon.id));this.weaponSprites.set(weapon.id,img);}
     }
-    resize(){const r=this.canvas.parentElement.getBoundingClientRect();this.w=r.width;this.h=r.height;this.dpr=Math.min(devicePixelRatio||1,2);this.zoom=Math.min(1,Math.max(.68,this.w/750));this.canvas.width=Math.round(this.w*this.dpr);this.canvas.height=Math.round(this.h*this.dpr);}
-    point(x,y){return{x:(x-this.camera.x)*this.zoom+this.w/2+this.sx,y:(y-this.camera.y)*this.zoom+this.h/2+this.sy};}
+    resize(){const arena=this.canvas.parentElement,r=arena.getBoundingClientRect(),style=getComputedStyle(arena),inset=name=>parseFloat(style.getPropertyValue('--battle-'+name))||0;this.w=r.width;this.h=r.height;this.dpr=Math.min(devicePixelRatio||1,2);this.zoom=Math.min(1,Math.max(.68,this.w/750));this.battle={top:inset('top'),bottom:inset('bottom'),right:inset('right'),shift:inset('shift')};this.canvas.width=Math.round(this.w*this.dpr);this.canvas.height=Math.round(this.h*this.dpr);}
+    point(x,y){return{x:(x-this.camera.x)*this.zoom+this.originX+this.sx,y:(y-this.camera.y)*this.zoom+this.originY+this.sy};}
     circle(x,y,r,color){const c=this.ctx;c.fillStyle=color;c.beginPath();c.arc(x,y,Math.max(0,r),0,TAU);c.fill();}
     ellipse(x,y,rx,ry,color){const c=this.ctx;c.fillStyle=color;c.beginPath();c.ellipse(x,y,rx,ry,0,0,TAU);c.fill();}
     glow(x,y,r,color){const c=this.ctx,g=c.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,color);g.addColorStop(1,'transparent');c.fillStyle=g;c.fillRect(x-r,y-r,r*2,r*2);}
@@ -55,7 +55,7 @@
     }
     background(config){
       const c=this.ctx;c.fillStyle=config.floor;c.fillRect(0,0,this.w,this.h);
-      const z=this.zoom,cell=135,ox=this.camera.x-this.w/2/z,oy=this.camera.y-this.h/2/z;
+      const z=this.zoom,cell=135,ox=this.camera.x-this.originX/z,oy=this.camera.y-this.originY/z;
       for(let tx=Math.floor(ox/cell)-1;tx<(ox+this.w/z)/cell+1;tx++)for(let ty=Math.floor(oy/cell)-1;ty<(oy+this.h/z)/cell+1;ty++){
         const p=this.point(tx*cell,ty*cell),v=hash(tx,ty);
         c.save();c.translate(p.x,p.y);c.scale(z,z);
@@ -175,6 +175,8 @@
     worldObject(x,y,fn,extent=160){const p=this.point(x,y),margin=Math.max(160,extent*this.zoom);if(p.x< -margin||p.x>this.w+margin||p.y< -margin||p.y>this.h+margin)return;const c=this.ctx;c.save();c.translate(p.x,p.y);c.scale(this.zoom,this.zoom);fn();c.restore();}
     render(game,dt,stage=0,profile){
       this.t+=dt;const c=this.ctx,p=game?.player,config=game?.config||D.stages[stage];
+      // Keep the player in the clear battlefield between the mobile controls.
+      this.originX=game?(this.w-this.battle.right)/2:this.w/2;this.originY=game?(this.h+this.battle.top-this.battle.bottom)/2+this.battle.shift:this.h/2;
       this.heroMotion=NecroMotion.track(this.heroMotion,p,dt,game?.mode==='playing',this.reduced);
       if(game)for(const m of game.minions)this.minionMotion.set(m,NecroMotion.track(this.minionMotion.get(m),m,dt,game.mode==='playing',this.reduced));
       if(p){this.camera.x+=(p.x-this.camera.x)*(1-Math.exp(-8*dt));this.camera.y+=(p.y-this.camera.y)*(1-Math.exp(-8*dt));}else this.camera={x:0,y:0};
@@ -211,10 +213,12 @@
       for(const q of this.particles){q.life-=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;const s=this.point(q.x,q.y);c.globalAlpha=Math.max(0,q.life);this.circle(s.x,s.y,2*this.zoom,q.color);}this.particles=this.particles.filter(q=>q.life>0);c.globalAlpha=1;
       c.font='bold 11px Segoe UI';c.textAlign='center';for(const n of this.numbers){n.life-=dt;n.y-=22*dt;const s=this.point(n.x,n.y);c.globalAlpha=Math.max(0,Math.min(1,n.life*3));c.fillStyle=n.color;c.fillText(n.text,s.x,s.y);}this.numbers=this.numbers.filter(n=>n.life>0);c.globalAlpha=1;
       // Keep the current boss findable outside the camera view.
-      for(const boss of game.enemies.filter(e=>e.boss)){const b=this.point(boss.x,boss.y);if(b.x<35||b.x>this.w-35||b.y<150||b.y>this.h-120){const x=Math.max(30,Math.min(this.w-30,b.x)),y=Math.max(150,Math.min(this.h-125,b.y)),a=Math.atan2(b.y-this.h/2,b.x-this.w/2);c.save();c.translate(x,y);c.rotate(a);c.fillStyle='#f6b5bc';c.beginPath();c.moveTo(10,0);c.lineTo(-7,-6);c.lineTo(-7,6);c.fill();c.restore();}}
+      const arrowTop=this.battle.top?this.battle.top+12:150,arrowBottom=this.battle.bottom?this.h-this.battle.bottom-12:this.h-125,arrowRight=this.w-this.battle.right-30;
+      for(const boss of game.enemies.filter(e=>e.boss)){const b=this.point(boss.x,boss.y);if(b.x<35||b.x>arrowRight+5||b.y<arrowTop||b.y>arrowBottom){const x=Math.max(30,Math.min(arrowRight,b.x)),y=Math.max(arrowTop,Math.min(arrowBottom,b.y)),a=Math.atan2(b.y-this.originY,b.x-this.originX);c.save();c.translate(x,y);c.rotate(a);c.fillStyle='#f6b5bc';c.beginPath();c.moveTo(10,0);c.lineTo(-7,-6);c.lineTo(-7,6);c.fill();c.restore();}}
       const vg=c.createRadialGradient(this.w/2,this.h/2,Math.min(this.w,this.h)*.25,this.w/2,this.h/2,Math.max(this.w,this.h)*.7);vg.addColorStop(0,'#10081c00');vg.addColorStop(1,'#10081c88');c.fillStyle=vg;c.fillRect(0,0,this.w,this.h);
     }
     menu(stage,profile){
+      if(matchMedia('(max-width:700px), (max-width:950px) and (max-height:500px)').matches)return;
       const mobile=this.w<700,c=this.ctx,x=this.w*(mobile?.69:.72),y=this.h*(mobile?.68:.42),scale=mobile?1.15:2.3;
       this.glow(x,y,220,'#ae73ec25');c.save();c.translate(x,y+28);c.strokeStyle='#b288db33';c.lineWidth=1;for(let i=0;i<3;i++){c.beginPath();c.ellipse(0,0,95+i*30,43+i*18,0,0,TAU);c.stroke();}c.restore();
       c.save();c.translate(x,y);c.scale(scale,scale);this.wizard({look:1,invuln:0,shield:0,presentation:true,heroId:profile?.equipped.hero,weaponId:profile?.equipped.weapon});c.restore();

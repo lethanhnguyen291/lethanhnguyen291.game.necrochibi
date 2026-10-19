@@ -15,10 +15,11 @@
   assets.apprentice.rig={top:8,cut:13,legs:[{x:-25,w:25,pivot:-12},{x:0,w:24,pivot:10}]};
   assets.keeper.rig={top:7,cut:12,legs:[{x:-17,w:18,pivot:-7},{x:1,w:20,pivot:11}]};
   assets.soulcaller.rig={top:8,cut:14,legs:[{x:-24,w:24,pivot:-11},{x:0,w:23,pivot:9}]};
-  function portrait(id='apprentice'){
+  function portrait(id='apprentice',weaponId){
     const asset=assets[id]||assets.apprentice,f=asset.frame,g=asset.grip,px=(g.x-f.x)/f.w*100,py=(g.y-f.y)/f.h*100;
+    const weapon=weaponId||asset.weapon,h=weapon==='soulTome'?61:72,w=h*2/3;
     const img='<img src="'+asset.src+'" width="1254" height="1254" alt="" decoding="async"';
-    return '<span class="hero-portrait" aria-hidden="true">'+img+'><span class="portrait-relic" style="left:'+(px-24/f.w*100)+'%;top:'+(py-39/f.h*100)+'%;width:'+(48/f.w*100)+'%;height:'+(72/f.h*100)+'%;transform:rotate(-.2rad);transform-origin:50% 54.167%">'+RelicArt.svg(asset.weapon)+'</span>'+img+' style="clip-path:ellipse('+(g.rx/f.w*100)+'% '+(g.ry/f.h*100)+'% at '+px+'% '+py+'%)"></span>';
+    return '<span class="hero-portrait" aria-hidden="true">'+img+'><span class="portrait-relic" style="left:'+(px-w/2/f.w*100)+'%;top:'+(py-h*65/120/f.h*100)+'%;width:'+(w/f.w*100)+'%;height:'+(h/f.h*100)+'%;transform:rotate(-.2rad);transform-origin:50% 54.167%">'+RelicArt.svg(weapon)+'</span>'+img+' style="clip-path:ellipse('+(g.rx/f.w*100)+'% '+(g.ry/f.h*100)+'% at '+px+'% '+py+'%)"></span>';
   }
   root.NecroHeroArt={styles,assets,portrait};
   if(typeof module!=='undefined')module.exports=root.NecroHeroArt;
